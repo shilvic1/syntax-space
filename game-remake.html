@@ -1,0 +1,723 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Portal Protocol — Remake</title>
+
+  <!-- Fonts / icons -->
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" rel="stylesheet"/>
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet"/>
+
+  <style>
+    :root{
+      --bg-1: #08101a;
+      --bg-2: #0f1b2b;
+      --accent: #00ffd5;
+      --panel: rgba(0,0,0,.6);
+    }
+    html,body{ height:100%; margin:0; background: linear-gradient(180deg,var(--bg-1),var(--bg-2)); font-family:"Press Start 2P",cursive; color:#fff; overflow:hidden; }
+    canvas{ display:block; margin:0 auto; background:transparent; }
+
+    /* UI */
+    .ui-button{ font-family:inherit; cursor:pointer; border:none; border-radius:8px; padding:10px 12px; background:#1b7a7a; color:#fff; box-shadow:0 4px 10px rgba(0,0,0,.4); }
+    .ui-button:active{ transform:translateY(1px); }
+
+    #topBar{ position:fixed; left:16px; top:12px; z-index:90; display:flex; gap:8px; align-items:center; }
+    #hotbar{ position:fixed; left:50%; transform:translateX(-50%); bottom:18px; display:flex; gap:8px; background:var(--panel); padding:8px; border-radius:10px; z-index:80; }
+    .hotbar-item{ width:48px; height:48px; border:2px solid rgba(255,255,255,.12); display:flex; align-items:center; justify-content:center; font-size:14px; background:rgba(255,255,255,.03); border-radius:6px; color:#fff; }
+    .hotbar-item.active{ border-color:var(--accent); box-shadow:0 0 12px rgba(0,255,213,.06); }
+
+    .modal{ position:fixed; left:50%; top:50%; transform:translate(-50%,-50%); background:rgba(3,6,10,.9); color:#fff; padding:16px; border-radius:12px; z-index:200; width:360px; display:none; box-shadow:0 8px 30px rgba(0,0,0,.6); }
+    .modal h2{ margin:0 0 10px 0; font-size:16px; text-align:center; }
+    .form-row{ margin:8px 0; display:flex; align-items:center; justify-content:space-between; gap:8px; }
+    .range{ width:60%; }
+
+    #rightClickMenu{ position:absolute; background:#111; color:#fff; padding:6px; border-radius:6px; display:none; z-index:200; list-style:none; margin:0; box-shadow:0 6px 20px rgba(0,0,0,.6); }
+    #rightClickMenu li{ padding:8px 12px; cursor:pointer; white-space:nowrap; }
+    #rightClickMenu li:hover{ background:#222; }
+
+    #chest, #door{ position:fixed; right:300px; bottom:18px; width:140px; height:140px; z-index:20; cursor:pointer; filter:drop-shadow(0 12px 18px rgba(0,0,0,.6)); }
+    #door{ right:460px; }
+
+    .interact-text{ position:absolute; color:#fff; background:rgba(0,0,0,.6); padding:6px 8px; border-radius:6px; display:none; z-index:30; font-size:12px; }
+
+    #debugInfo{ position:fixed; right:12px; top:12px; z-index:90; font-size:12px; color:rgba(255,255,255,.8); background:rgba(0,0,0,.3); padding:8px; border-radius:8px; }
+
+    @media (max-width:600px){
+      #hotbar{ bottom:110px; }
+      #chest,#door{ width:100px; height:100px; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top UI -->
+  <div id="topBar">
+    <button id="pauseBtn" class="ui-button"><i class="fas fa-pause"></i> Pause</button>
+    <button id="settingsBtn" class="ui-button"><i class="fas fa-cog"></i> Settings</button>
+    <button id="saveBtn" class="ui-button"><i class="fas fa-save"></i> Save</button>
+  </div>
+
+  <!-- Canvas -->
+  <canvas id="gameCanvas" width="1280" height="720"></canvas>
+
+  <!-- Interact texts -->
+  <div id="interactTextChest" class="interact-text">Press E to Open Chest</div>
+  <div id="interactTextDoor"  class="interact-text">Press E to Enter</div>
+
+  <!-- Chest & Door images (same assets as original) -->
+  <img id="chest" src="https://cdn.glitch.global/786ea774-457c-43de-bae1-f741692bf03d/metal%20chest.png?v=1742944087746" alt="Chest">
+  <img id="door"  src="https://cdn.glitch.global/786ea774-457c-43de-bae1-f741692bf03d/metal%20door.png?v=1741449268513" alt="Door">
+
+  <!-- Hotbar -->
+  <div id="hotbar">
+    <div class="hotbar-item" data-slot="1">1</div>
+    <div class="hotbar-item" data-slot="2">2</div>
+    <div class="hotbar-item" data-slot="3">3</div>
+    <div class="hotbar-item" data-slot="4">4</div>
+    <div class="hotbar-item" data-slot="5">5</div>
+    <div class="hotbar-item" data-slot="6">6</div>
+    <div class="hotbar-item" data-slot="7">7</div>
+    <div class="hotbar-item" data-slot="8">8</div>
+  </div>
+
+  <!-- Right click menu -->
+  <ul id="rightClickMenu">
+    <li id="menuRestart">Restart Game</li>
+    <li id="menuToggleMusic">Toggle Music</li>
+    <li id="menuToggleSFX">Toggle SFX</li>
+    <li id="menuSettings">Settings</li>
+    <li id="menuFullscreen">Toggle Fullscreen</li>
+  </ul>
+
+  <!-- Settings modal -->
+  <div id="settingsMenu" class="modal" aria-hidden="true">
+    <h2>Settings</h2>
+    <div class="form-row">
+      <label>Music</label>
+      <input id="musicVolume" class="range" type="range" min="0" max="1" step="0.01">
+      <span id="musicLabel">100%</span>
+    </div>
+    <div class="form-row">
+      <label>SFX</label>
+      <input id="sfxVolume" class="range" type="range" min="0" max="1" step="0.01">
+      <span id="sfxLabel">100%</span>
+    </div>
+    <div class="form-row">
+      <label>Enable Music</label>
+      <input id="toggleMusic" type="checkbox">
+    </div>
+    <div class="form-row">
+      <label>Enable SFX</label>
+      <input id="toggleSFX" type="checkbox">
+    </div>
+    <div style="margin-top:12px; display:flex; gap:8px;">
+      <button id="saveSettings" class="ui-button" style="flex:1">Save</button>
+      <button id="closeSettings" class="ui-button" style="flex:1; background:#a63b3b"><i class="fas fa-times"></i> Close</button>
+    </div>
+  </div>
+
+  <!-- Pause modal -->
+  <div id="pauseMenu" class="modal" aria-hidden="true">
+    <h2>Paused</h2>
+    <div style="display:flex; gap:8px; flex-direction:column;">
+      <button id="resumeBtn" class="ui-button">Resume</button>
+      <button id="restartBtn" class="ui-button">Restart</button>
+      <button id="toMenuBtn" class="ui-button">Exit to Menu</button>
+    </div>
+  </div>
+
+  <div id="debugInfo"></div>
+
+<script>
+(() => {
+  /* ===========================
+     References & elements
+     =========================== */
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // Resize canvas to window keeping aspect-ish
+  function resizeCanvas() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+  }
+  resizeCanvas();
+  window.addEventListener('resize', resizeCanvas);
+
+  const chestEl = document.getElementById('chest');
+  const doorEl = document.getElementById('door');
+  const interactTextChest = document.getElementById('interactTextChest');
+  const interactTextDoor = document.getElementById('interactTextDoor');
+  const hotbar = document.getElementById('hotbar');
+  const hotbarItems = document.querySelectorAll('.hotbar-item');
+
+  const pauseBtn = document.getElementById('pauseBtn');
+  const settingsBtn = document.getElementById('settingsBtn');
+  const saveBtn = document.getElementById('saveBtn');
+  const rightClickMenu = document.getElementById('rightClickMenu');
+  const settingsMenu = document.getElementById('settingsMenu');
+  const musicVolumeEl = document.getElementById('musicVolume');
+  const sfxVolumeEl = document.getElementById('sfxVolume');
+  const musicLabel = document.getElementById('musicLabel');
+  const sfxLabel = document.getElementById('sfxLabel');
+  const toggleMusic = document.getElementById('toggleMusic');
+  const toggleSFX = document.getElementById('toggleSFX');
+  const saveSettingsBtn = document.getElementById('saveSettings');
+  const closeSettingsBtn = document.getElementById('closeSettings');
+
+  const pauseMenu = document.getElementById('pauseMenu');
+  const resumeBtn = document.getElementById('resumeBtn');
+  const restartBtn = document.getElementById('restartBtn');
+  const toMenuBtn = document.getElementById('toMenuBtn');
+
+  const menuRestart = document.getElementById('menuRestart');
+  const menuToggleMusic = document.getElementById('menuToggleMusic');
+  const menuToggleSFX = document.getElementById('menuToggleSFX');
+  const menuSettings = document.getElementById('menuSettings');
+  const menuFullscreen = document.getElementById('menuFullscreen');
+
+  const debugInfo = document.getElementById('debugInfo');
+
+  /* ===========================
+     Game state
+     =========================== */
+  const state = {
+    paused: false,
+    musicEnabled: true,
+    sfxEnabled: true,
+    musicVol: 1,
+    sfxVol: 1,
+    selectedHotbar: 1,
+  };
+
+  /* ===========================
+     Audio (improved handling)
+     - SFX only play on input events (keydown/touchstart). No audio restart each frame.
+     - Footsteps use loop while movement keys are held (play on keydown, pause on keyup)
+     =========================== */
+  const backgroundMusic = new Audio("https://cdn.glitch.global/786ea774-457c-43de-bae1-f741692bf03d/Galactic%20Glow-2.mp3?v=1741567498167");
+  backgroundMusic.loop = true;
+  backgroundMusic.volume = state.musicVol;
+
+  // SFX: small, short files are better for one-shot
+  const jumpSFX = new Audio("https://cdn.glitch.global/786ea774-457c-43de-bae1-f741692bf03d/cartoon-jump-6462%20(1).mp3?v=1743861440466");
+  const footstepSFX = new Audio("https://cdn.glitch.global/786ea774-457c-43de-bae1-f741692bf03d/loud-footsteps-62038-%5BAudioTrimmer.com%5D-%5BAudioTrimmer.com%5D.mp3?v=1743995310590");
+  const runSFX = new Audio("https://cdn.glitch.global/786ea774-457c-43de-bae1-f741692bf03d/running-on-concrete-268478.mp3?v=1743861464620");
+
+  // Configure volumes
+  function applyAudioSettings(){
+    backgroundMusic.volume = state.musicVol;
+    [jumpSFX, footstepSFX, runSFX].forEach(a => { a.volume = state.sfxVol; });
+    toggleMusic.checked = state.musicEnabled;
+    toggleSFX.checked = state.sfxEnabled;
+    musicLabel.innerText = Math.round(state.musicVol * 100) + '%';
+    sfxLabel.innerText = Math.round(state.sfxVol * 100) + '%';
+  }
+
+  // Keep footstep looping while movement input is active. We avoid calling play from game loop.
+  footstepSFX.loop = true;
+  runSFX.loop = true;
+  let footstepPlaying = false;
+  let runPlaying = false;
+
+  // Helper to play one-shot safely
+  function playOneShot(audio){
+    if (!state.sfxEnabled) return;
+    try {
+      audio.pause();
+      audio.currentTime = 0;
+      audio.play();
+    } catch(e){ /* playback might be blocked until gesture */ }
+  }
+
+  // play looping SFX only on input press
+  function startFootstepLoop(isRunning = false){
+    if (!state.sfxEnabled) return;
+    if (isRunning){
+      if (!runPlaying){
+        runSFX.currentTime = 0;
+        runSFX.play().catch(()=>{});
+        runPlaying = true;
+      }
+    } else {
+      if (!footstepPlaying){
+        footstepSFX.currentTime = 0;
+        footstepSFX.play().catch(()=>{});
+        footstepPlaying = true;
+      }
+    }
+  }
+  function stopFootstepLoop(){
+    if (footstepPlaying){
+      footstepSFX.pause();
+      footstepPlaying = false;
+    }
+    if (runPlaying){
+      runSFX.pause();
+      runPlaying = false;
+    }
+  }
+
+  /* ===========================
+     Player & world (smoother mechanics)
+     - acceleration, friction
+     - variable jump (hold for higher jump)
+     - sprint with Shift, double-tap for dash
+     - particles for quick visual improvement
+     =========================== */
+  const player = {
+    x: 120,
+    y: 200,
+    w: 48,
+    h: 64,
+    colorA: '#00ffd5',
+    colorB: '#006b6b',
+    vx: 0,
+    vy: 0,
+    speed: 8,
+    accel: 1.2,
+    friction: 0.85,
+    gravity: 0.9,
+    jumpSpeed: -15,
+    onGround: false,
+    jumping: false,
+    canDoubleJump: true
+  };
+
+  // ground
+  function groundY(){ return canvas.height - 120; }
+
+  // background parallax layers (simple)
+  const bgLayers = [
+    { speed: 0.05, color: 'linear-gradient(180deg, rgba(10,18,30,0.0), rgba(10,18,30,0.6))' },
+    { speed: 0.2, color: null },
+  ];
+  let camX = 0;
+
+  // particles for dust
+  const particles = [];
+  function spawnDust(x,y, count=6){
+    for(let i=0;i<count;i++){
+      particles.push({
+        x, y,
+        vx: (Math.random()-0.5) * 4,
+        vy: -Math.random()*2 - 1,
+        life: 40 + Math.random()*30,
+        size: 2 + Math.random()*4,
+        color: 'rgba(200,200,200,0.7)'
+      });
+    }
+  }
+
+  /* ===========================
+     Input handling (reworked)
+     - we orchestrate SFX playback in keydown/keyup so sound plays only on actual input events
+     - keydown triggers one-shot or starts footstep-loop; keyup stops it
+     =========================== */
+  const keys = { left:false, right:false, up:false, shift:false };
+  let lastKeyTime = 0; // for double-tap dash
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A'){
+      if (!keys.left) { // new press
+        // start footstep / run loop on press
+        startFootstepLoop(keys.shift);
+      }
+      keys.left = true;
+      lastKeyTime = Date.now();
+    }
+    if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D'){
+      if (!keys.right){
+        startFootstepLoop(keys.shift);
+      }
+      keys.right = true;
+      lastKeyTime = Date.now();
+    }
+    if (e.key === 'Shift') {
+      keys.shift = true;
+      // if moving, switch to running sound
+      if (keys.left || keys.right) {
+        stopFootstepLoop();
+        startFootstepLoop(true);
+      }
+    }
+    if (e.code === 'Space' || e.key === 'w' || e.key === 'W' || e.key === 'ArrowUp'){
+      // jump pressed: play one-shot jump SFX (only on actual press)
+      if (player.onGround || player.canDoubleJump){
+        playOneShot(jumpSFX);
+      }
+      if (player.onGround){
+        player.vy = player.jumpSpeed;
+        player.onGround = false;
+        player.jumping = true;
+        player.canDoubleJump = true;
+      } else if (player.canDoubleJump){
+        // double jump
+        player.vy = player.jumpSpeed * 0.85;
+        player.canDoubleJump = false;
+      }
+    }
+
+    // Interact E
+    if (e.key === 'e' || e.key === 'E'){
+      if (isHoveringChest) openChest();
+      if (isHoveringDoor) enterDoor();
+    }
+
+    // Pause
+    if (e.key === 'Escape') togglePause();
+
+    // hotbar
+    if (e.key >= '1' && e.key <= '8'){
+      state.selectedHotbar = parseInt(e.key);
+      updateHotbarUI();
+    }
+  });
+
+  document.addEventListener('keyup',(e) => {
+    if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A'){
+      keys.left = false;
+      if (!keys.right) stopFootstepLoop();
+      else startFootstepLoop(keys.shift);
+    }
+    if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D'){
+      keys.right = false;
+      if (!keys.left) stopFootstepLoop();
+      else startFootstepLoop(keys.shift);
+    }
+    if (e.key === 'Shift'){
+      keys.shift = false;
+      if (keys.left || keys.right){
+        stopFootstepLoop();
+        startFootstepLoop(false);
+      }
+    }
+  });
+
+  // Touch controls: trigger sfx on touchstart
+  let touchMoveStart = null;
+  document.addEventListener('touchstart', (e) => {
+    // unmute/play music on first gesture if needed
+    unlockAudioOnFirstGesture();
+  });
+
+  // Right-click menu
+  canvas.addEventListener('contextmenu', (ev) => {
+    ev.preventDefault();
+    rightClickMenu.style.left = ev.pageX + 'px';
+    rightClickMenu.style.top = ev.pageY + 'px';
+    rightClickMenu.style.display = 'block';
+  });
+  document.addEventListener('click', () => { rightClickMenu.style.display = 'none'; });
+
+  // Hotbar UI
+  function updateHotbarUI(){
+    hotbarItems.forEach(it => it.classList.remove('active'));
+    const el = document.querySelector(`.hotbar-item[data-slot="${state.selectedHotbar}"]`);
+    if (el) el.classList.add('active');
+  }
+  updateHotbarUI();
+
+  /* ===========================
+     Chest & Door interactions (simple)
+     =========================== */
+  let isHoveringChest = false;
+  let isHoveringDoor = false;
+
+  function positionInteractText(el, textEl){
+    const rect = el.getBoundingClientRect();
+    textEl.style.left = Math.max(8, rect.left + rect.width/2 - 60) + 'px';
+    textEl.style.top  = Math.max(8, rect.top - 40) + 'px';
+  }
+
+  chestEl.addEventListener('mouseenter', () => { isHoveringChest = true; positionInteractText(chestEl, interactTextChest); interactTextChest.style.display='block'; });
+  chestEl.addEventListener('mouseleave', () => { isHoveringChest = false; interactTextChest.style.display='none'; });
+  chestEl.addEventListener('click', openChest);
+
+  doorEl.addEventListener('mouseenter', () => { isHoveringDoor = true; positionInteractText(doorEl, interactTextDoor); interactTextDoor.style.display='block'; });
+  doorEl.addEventListener('mouseleave', () => { isHoveringDoor = false; interactTextDoor.style.display='none'; });
+  doorEl.addEventListener('click', enterDoor);
+
+  function openChest(){ alert('Chest opened (demo).'); }
+  function enterDoor(){
+    document.body.style.background = 'linear-gradient(180deg,#050816,#0b1830)';
+    player.x = (canvas.width - player.w)/2;
+    player.y = (canvas.height - player.h)/2;
+    player.vx = player.vy = 0;
+  }
+
+  /* ===========================
+     Settings UI handlers
+     =========================== */
+  settingsBtn.addEventListener('click', () => { settingsMenu.style.display = 'block'; });
+  closeSettingsBtn.addEventListener('click', () => { settingsMenu.style.display = 'none'; });
+  pauseBtn.addEventListener('click', togglePause);
+  saveBtn.addEventListener('click', () => {
+    localStorage.setItem('playerX', player.x);
+    localStorage.setItem('playerY', player.y);
+    alert('Saved player position (demo).');
+  });
+
+  saveSettingsBtn.addEventListener('click', () => {
+    state.musicVol = parseFloat(musicVolumeEl.value);
+    state.sfxVol = parseFloat(sfxVolumeEl.value);
+    state.musicEnabled = toggleMusic.checked;
+    state.sfxEnabled = toggleSFX.checked;
+    localStorage.setItem('game_settings', JSON.stringify(state));
+    applyAudioSettings();
+    alert('Settings saved.');
+    settingsMenu.style.display = 'none';
+  });
+
+  // right-click menu wiring
+  menuRestart.addEventListener('click', () => { restartGame(); rightClickMenu.style.display='none'; });
+  menuToggleMusic.addEventListener('click', () => {
+    state.musicEnabled = !state.musicEnabled; applyAudioSettings();
+    if (state.musicEnabled) backgroundMusic.play().catch(()=>{}); else backgroundMusic.pause();
+    rightClickMenu.style.display='none';
+  });
+  menuToggleSFX.addEventListener('click', () => { state.sfxEnabled = !state.sfxEnabled; applyAudioSettings(); rightClickMenu.style.display='none'; });
+  menuSettings.addEventListener('click', () => { settingsMenu.style.display='block'; rightClickMenu.style.display='none'; });
+  menuFullscreen.addEventListener('click', () => {
+    if (!document.fullscreenElement) document.documentElement.requestFullscreen();
+    else document.exitFullscreen();
+    rightClickMenu.style.display='none';
+  });
+
+  /* ===========================
+     Pause, restart
+     =========================== */
+  function togglePause(){
+    state.paused = !state.paused;
+    pauseMenu.style.display = state.paused ? 'block' : 'none';
+    if (!state.paused) {
+      // resume audio optionally
+    }
+  }
+  resumeBtn.addEventListener('click', () => { state.paused = false; pauseMenu.style.display='none'; });
+  restartBtn.addEventListener('click', restartGame);
+  toMenuBtn.addEventListener('click', () => { alert('Return to menu (not implemented)'); });
+
+  function restartGame(){
+    player.x = 120; player.y = 200; player.vx = 0; player.vy = 0;
+    player.onGround = false; player.canDoubleJump = true;
+    state.paused = false; pauseMenu.style.display='none';
+    try{ if (state.musicEnabled) backgroundMusic.play(); }catch(e){}
+  }
+
+  /* ===========================
+     Load saved settings (if any)
+     =========================== */
+  (function loadSettings(){
+    const saved = localStorage.getItem('game_settings');
+    if (saved){
+      try{
+        const s = JSON.parse(saved);
+        Object.assign(state, s);
+      } catch(e){}
+    }
+    // initialize UI controls
+    musicVolumeEl.value = state.musicVol;
+    sfxVolumeEl.value = state.sfxVol;
+    musicLabel.innerText = Math.round(state.musicVol*100) + '%';
+    sfxLabel.innerText = Math.round(state.sfxVol*100) + '%';
+    toggleMusic.checked = state.musicEnabled;
+    toggleSFX.checked = state.sfxEnabled;
+    applyAudioSettings();
+    // try to play music on load if enabled (may be blocked until gesture)
+    try{ if (state.musicEnabled) backgroundMusic.play().catch(()=>{}); }catch(e){}
+  })();
+
+  // live update labels
+  musicVolumeEl.addEventListener('input', (e) => { musicLabel.innerText = Math.round(e.target.value * 100) + '%'; });
+  sfxVolumeEl.addEventListener('input', (e) => { sfxLabel.innerText = Math.round(e.target.value * 100) + '%'; });
+
+  /* ===========================
+     Unlock audio on first gesture
+     =========================== */
+  function unlockAudioOnFirstGesture(){
+    document.removeEventListener('pointerdown', unlockAudioOnFirstGesture);
+    try { if (state.musicEnabled) backgroundMusic.play(); } catch(e){}
+  }
+  document.addEventListener('pointerdown', unlockAudioOnFirstGesture);
+
+  /* ===========================
+     Game loop & draw
+     =========================== */
+  function update(dt){
+    if (state.paused) return;
+
+    // horizontal movement with accel + friction
+    let targetVx = 0;
+    if (keys.left) targetVx = -player.speed;
+    if (keys.right) targetVx = player.speed;
+    if (keys.shift) targetVx *= 1.35; // sprint
+
+    // accelerate towards target
+    player.vx += (targetVx - player.vx) * 0.18;
+
+    // gravity
+    player.vy += player.gravity;
+    // variable jump height: if jumping and player releases up, slightly reduce ascent
+    // (handled by keyup of jump — not implemented as hold variation for simplicity)
+
+    // position
+    player.x += player.vx;
+    player.y += player.vy;
+
+    // ground collision
+    if (player.y + player.h > groundY()){
+      if (!player.onGround) {
+        // landed — reset double jump
+        player.canDoubleJump = true;
+        spawnDust(player.x + player.w/2, groundY());
+      }
+      player.y = groundY() - player.h;
+      player.vy = 0;
+      player.onGround = true;
+      player.jumping = false;
+    } else {
+      player.onGround = false;
+    }
+
+    // bound
+    if (player.x < 12) player.x = 12;
+    if (player.x + player.w > canvas.width - 12) player.x = canvas.width - 12 - player.w;
+
+    // camera (parallax)
+    camX += (player.x - camX - canvas.width*0.45) * 0.02;
+
+    // update particles
+    for (let i = particles.length-1; i >=0; i--){
+      const p = particles[i];
+      p.x += p.vx; p.y += p.vy; p.vy += 0.12; p.life--;
+      if (p.life <= 0) particles.splice(i,1);
+    }
+
+    // debug
+    debugInfo.innerText = `x:${Math.round(player.x)} y:${Math.round(player.y)} vx:${player.vx.toFixed(2)} vy:${player.vy.toFixed(2)} onGround:${player.onGround}`;
+  }
+
+  function draw(){
+    // clear
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+
+    // draw simple starfield background (parallax)
+    const starCount = 50;
+    ctx.save();
+    // subtle gradient overlay
+    const grad = ctx.createLinearGradient(0,0,0,canvas.height);
+    grad.addColorStop(0, '#071220');
+    grad.addColorStop(1, '#02111a');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0,0,canvas.width,canvas.height);
+    // stars
+    ctx.fillStyle = 'rgba(255,255,255,0.06)';
+    for(let i=0;i<starCount;i++){
+      const sx = (i * 37 + Math.floor(camX*0.2)) % (canvas.width + 200) - 100;
+      const sy = (i * 47) % canvas.height;
+      ctx.fillRect(sx, sy, 2, 2);
+    }
+    ctx.restore();
+
+    // ground
+    ctx.fillStyle = '#26313a';
+    ctx.fillRect(0, groundY(), canvas.width, canvas.height - groundY());
+
+    // platform highlight
+    ctx.fillStyle = '#2e3943';
+    ctx.fillRect(0, groundY()+8, canvas.width, 40);
+
+    // particles
+    for (const p of particles){
+      ctx.fillStyle = p.color;
+      ctx.globalAlpha = Math.max(0, p.life / 80);
+      ctx.fillRect(p.x - camX*0.0, p.y, p.size, p.size);
+      ctx.globalAlpha = 1;
+    }
+
+    // draw player (rounded rect with gradient)
+    const px = player.x;
+    const py = player.y;
+    const pw = player.w;
+    const ph = player.h;
+    const g = ctx.createLinearGradient(px, py, px, py + ph);
+    g.addColorStop(0, player.colorA);
+    g.addColorStop(1, player.colorB);
+    ctx.fillStyle = g;
+    roundRect(ctx, px, py, pw, ph, 8, true, false);
+
+    // visor / face (simple)
+    ctx.fillStyle = 'rgba(255,255,255,0.95)';
+    ctx.fillRect(px + pw*0.14, py + ph*0.2, pw*0.72, ph*0.18);
+    ctx.fillStyle = '#04181a';
+    ctx.fillRect(px + pw*0.14, py + ph*0.2 + 6, pw*0.72, ph*0.06);
+
+    // small shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.25)';
+    ctx.fillRect(px + 8, groundY() - 6, pw - 16, 6);
+
+    // HUD (hotbar)
+    // (hotbar is DOM-based; skip drawing here)
+
+  }
+
+  // small helper: rounded rect
+  function roundRect(ctx,x,y,w,h,r,fill,stroke){
+    if (typeof r === 'undefined') r = 5;
+    ctx.beginPath();
+    ctx.moveTo(x+r,y);
+    ctx.arcTo(x+w,y,x+w,y+h,r);
+    ctx.arcTo(x+w,y+h,x,y+h,r);
+    ctx.arcTo(x,y+h,x,y,r);
+    ctx.arcTo(x,y,x+w,y,r);
+    ctx.closePath();
+    if (fill) ctx.fill(); if (stroke) ctx.stroke();
+  }
+
+  let last = performance.now();
+  function loop(now){
+    const dt = now - last; last = now;
+    update(dt);
+    draw();
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+
+  /* ===========================
+     Make sure SFX only play on input:
+     - Jump SFX: one-shot at keydown (handled above)
+     - Footsteps: loop toggled ON at keydown and OFF at keyup (handled above)
+     - No playSFX calls inside the per-frame update/draw loops
+     =========================== */
+
+  /* ===========================
+     Helpers & mobile support
+     =========================== */
+  if (/Mobi|Android/i.test(navigator.userAgent)) {
+    hotbar.style.display = 'none'; // hide hotbar on mobile by default
+  }
+
+  // Attempt to start music when allowed
+  document.addEventListener('pointerdown', unlockAudioOnFirstGesture);
+
+  // unlock helper re-declared for safety
+  function unlockAudioOnFirstGesture(){
+    try { if (state.musicEnabled) backgroundMusic.play().catch(()=>{}); } catch(e){}
+    document.removeEventListener('pointerdown', unlockAudioOnFirstGesture);
+  }
+
+  /* ===========================
+     Clean shutdown of loops on unload
+     =========================== */
+  window.addEventListener('beforeunload', () => {
+    try{ backgroundMusic.pause(); footstepSFX.pause(); runSFX.pause(); }catch(e){}
+  });
+
+})();
+</script>
+
+</body>
+</html>

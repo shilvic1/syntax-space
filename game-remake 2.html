@@ -1,0 +1,736 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Portal Protocol</title>
+
+  <!-- External assets -->
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" rel="stylesheet"/>
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet"/>
+
+  <style>
+    /* ---------- Basic layout ---------- */
+    html,body { height:100%; margin:0; padding:0; background:#000; font-family:"Press Start 2P",cursive; overflow:hidden; color:#fff; }
+    canvas { display:block; background:#111; margin:0 auto; }
+
+    /* ---------- Buttons / small UI ---------- */
+    button { font-family:inherit; cursor:pointer; border:none; border-radius:6px; transition:all .15s ease; }
+    button:active { transform:translateY(1px); }
+
+    /* Skip cutscene button */
+    #skipButton {
+      position: absolute; right:20px; bottom:20px;
+      background:#e74c3c; color:#fff; padding:12px 16px; z-index:60; border-radius:8px;
+    }
+
+    /* Pause / Settings / Chest / Inventory boxes */
+    .modal {
+      position:fixed; left:50%; top:50%; transform:translate(-50%,-50%);
+      background:rgba(0,0,0,.88); color:#fff; padding:18px; border-radius:10px; z-index:100;
+      width:320px; max-width:92%;
+      box-sizing:border-box; display:none;
+    }
+    .modal h2 { margin:0 0 12px 0; font-size:16px; text-align:center; }
+    .form-group { margin:10px 0; text-align:center; }
+    .modal button { width:100%; padding:10px; background:#28a745; color:#fff; border-radius:6px; font-size:13px; }
+    .modal button:hover { background:#218838; }
+
+    /* Right-click menu */
+    #rightClickMenu {
+      position:absolute; background:#222; color:#fff; padding:6px; border-radius:6px; display:none; z-index:200;
+      list-style:none; margin:0;
+    }
+    #rightClickMenu li { padding:8px 12px; cursor:pointer; white-space:nowrap; }
+    #rightClickMenu li:hover { background:#333; }
+
+    /* Hotbar */
+    #hotbar {
+      position:fixed; left:50%; transform:translateX(-50%); bottom:20px; display:flex; gap:8px;
+      background:rgba(0,0,0,.7); padding:10px; border-radius:10px; z-index:40;
+    }
+    .hotbar-item { width:50px; height:50px; border:2px solid #fff; display:flex; align-items:center; justify-content:center; font-size:18px; background:rgba(255,255,255,.06); color:#fff; border-radius:6px; }
+    .hotbar-item.active { border-color:cyan; background:rgba(0,255,255,.12); }
+
+    /* Chest image */
+    #chest { position:fixed; right:305px; bottom:18px; width:150px; height:150px; z-index:20; cursor:pointer; }
+
+    /* Interact text */
+    .interact-text { position:absolute; color:#fff; background:rgba(0,0,0,.6); padding:6px 8px; border-radius:6px; display:none; z-index:30; font-size:12px; }
+
+    /* Door */
+    #door { position:fixed; right:500px; bottom:18px; width:150px; height:150px; z-index:20; cursor:pointer; }
+
+    /* Mobile controls */
+    #mobileControls { position:fixed; left:50%; transform:translateX(-50%); bottom:20px; display:none; gap:16px; z-index:40; }
+    .mobileButton { background:#28a745; color:#fff; padding:12px 14px; border-radius:6px; font-size:12px; }
+
+    /* Chest UI grid */
+    #chestUI .grid { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-top:10px; }
+    .chest-item { background:#333; color:#fff; height:72px; display:flex; align-items:center; justify-content:center; border-radius:6px; cursor:pointer; }
+    .chest-item:hover { background:#ff6f61; }
+
+    /* inventory (example) */
+    #inventory { position:fixed; left:50%; top:50%; transform:translate(-50%,-50%); width:420px; padding:12px; border-radius:8px; display:none; z-index:110; background:rgba(0,0,0,.9); border:2px solid cyan; }
+    #inventory-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin-top:8px; }
+    .inventory-slot { height:60px; border:2px solid #fff; display:flex; align-items:center; justify-content:center; border-radius:6px; background:rgba(255,255,255,.06); }
+
+    /* small responsive behavior */
+    @media (max-width:600px) {
+      #hotbar { bottom:100px; }
+      #chest { width:110px; height:110px; right:150px; bottom:12px; }
+      #door { right:300px; bottom:12px; width:110px; height:110px; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Skip -->
+  <button id="skipButton"><i class="fas fa-forward"></i> Skip Cutscene</button>
+
+  <!-- Canvas -->
+  <canvas id="gameCanvas" width="800" height="540"></canvas>
+
+  <!-- Interact texts (positioned dynamically by JS) -->
+  <div id="interactTextChest" class="interact-text">Press E to Open Chest</div>
+  <div id="interactTextDoor"  class="interact-text">Press E to Enter</div>
+
+  <!-- Chest image, door image -->
+  <img id="chest" src="https://cdn.glitch.global/786ea774-457c-43de-bae1-f741692bf03d/metal%20chest.png?v=1742944087746" alt="Chest">
+  <img id="door"  src="https://cdn.glitch.global/786ea774-457c-43de-bae1-f741692bf03d/metal%20door.png?v=1741449268513" alt="Door">
+
+  <!-- Right-click menu -->
+  <ul id="rightClickMenu">
+    <li id="menuRestart">Restart Game</li>
+    <li id="menuToggleSound">Toggle Sound</li>
+    <li id="menuSaveGame">Save Game</li>
+    <li id="menuToggleFullscreen">Toggle Fullscreen</li>
+    <li id="menuSettings">Settings</li>
+    <li id="menuToggleSFX">Toggle SFX</li>
+  </ul>
+
+  <!-- Hotbar -->
+  <div id="hotbar">
+    <div class="hotbar-item" data-slot="1">1</div>
+    <div class="hotbar-item" data-slot="2">2</div>
+    <div class="hotbar-item" data-slot="3">3</div>
+    <div class="hotbar-item" data-slot="4">4</div>
+    <div class="hotbar-item" data-slot="5">5</div>
+    <div class="hotbar-item" data-slot="6">6</div>
+    <div class="hotbar-item" data-slot="7">7</div>
+    <div class="hotbar-item" data-slot="8">8</div>
+  </div>
+
+  <!-- Pause menu (modal) -->
+  <div id="pauseMenu" class="modal">
+    <h2>Game Paused</h2>
+    <div class="form-group"><button id="resumeButton">Resume</button></div>
+    <div class="form-group"><button id="restartButton">Restart Game</button></div>
+    <div class="form-group"><button id="exitButton">Exit to Main Menu</button></div>
+    <div class="form-group"><button id="openSettingsFromPause">Settings</button></div>
+  </div>
+
+  <!-- Settings modal -->
+  <div id="settingsMenu" class="modal" style="display:none;">
+    <h2>Settings</h2>
+    <div class="form-group">
+      <label style="display:block; margin-bottom:8px;">Show Hotbar: <input id="hotbarToggle" type="checkbox" checked></label>
+    </div>
+    <div class="form-group">
+      <label style="display:block; margin-bottom:6px;">Background Music Volume</label>
+      <input id="volumeControl" type="range" min="0" max="1" step="0.01" value="1">
+      <div style="margin-top:6px; font-size:12px; text-align:center;"><span id="volumeLabel">100%</span></div>
+    </div>
+    <div class="form-group">
+      <label style="display:block; margin-bottom:6px;">Save Cutscene Progress: <input id="saveCutsceneProgress" type="checkbox" checked></label>
+    </div>
+    <div class="form-group"><button id="saveSettings">Save Settings</button></div>
+    <div class="form-group"><button id="closeSettings">Close</button></div>
+  </div>
+
+  <!-- Chest UI -->
+  <div id="chestUI" class="modal" style="width:360px;">
+    <h2>Chest</h2>
+    <div class="grid" id="chestGrid">
+      <div class="chest-item">Gun<br><img src="https://cdn.glitch.global/786ea774-457c-43de-bae1-f741692bf03d/4e707c54-a28f-454b-852f-ae825ca9f20f.image.png?v=1743862665001" style="max-width:80%; display:block; margin:6px auto 0;"></div>
+      <div class="chest-item">Medkit</div>
+      <div class="chest-item"></div>
+      <div class="chest-item"></div>
+      <div class="chest-item"></div>
+      <div class="chest-item"></div>
+    </div>
+    <div class="form-group"><button id="closeChest">Close</button></div>
+  </div>
+
+  <!-- Inventory (example) -->
+  <div id="inventory">
+    <h2>Inventory</h2>
+    <div id="inventory-grid">
+      <div class="inventory-slot"></div>
+      <div class="inventory-slot"></div>
+      <div class="inventory-slot"></div>
+      <div class="inventory-slot"></div>
+      <div class="inventory-slot"></div>
+      <div class="inventory-slot"></div>
+      <div class="inventory-slot"></div>
+      <div class="inventory-slot"></div>
+    </div>
+  </div>
+
+  <!-- Mobile controls -->
+  <div id="mobileControls">
+    <button id="moveLeft" class="mobileButton">Left</button>
+    <button id="moveRight" class="mobileButton">Right</button>
+    <button id="jump" class="mobileButton">Jump</button>
+  </div>
+
+  <script>
+  (function(){
+    /* ======================
+       References & elements
+       ====================== */
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+
+    // Responsive canvas at start
+    function resizeCanvas(){
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    }
+    resizeCanvas();
+    window.addEventListener('resize', resizeCanvas);
+
+    // DOM elements
+    const skipButton = document.getElementById('skipButton');
+    const chestEl = document.getElementById('chest');
+    const doorEl  = document.getElementById('door');
+    const chestUI = document.getElementById('chestUI');
+    const closeChestBtn = document.getElementById('closeChest');
+    const interactTextChest = document.getElementById('interactTextChest');
+    const interactTextDoor  = document.getElementById('interactTextDoor');
+    const rightClickMenu = document.getElementById('rightClickMenu');
+    const pauseMenu = document.getElementById('pauseMenu');
+    const resumeButton = document.getElementById('resumeButton');
+    const restartButton = document.getElementById('restartButton');
+    const exitButton = document.getElementById('exitButton');
+    const openSettingsFromPause = document.getElementById('openSettingsFromPause');
+    const settingsMenu = document.getElementById('settingsMenu');
+    const closeSettingsBtn = document.getElementById('closeSettings');
+    const saveSettingsBtn = document.getElementById('saveSettings');
+    const hotbarToggle = document.getElementById('hotbarToggle');
+    const hotbar = document.getElementById('hotbar');
+    const volumeControl = document.getElementById('volumeControl');
+    const volumeLabel = document.getElementById('volumeLabel');
+    const saveCutsceneProgressCheckbox = document.getElementById('saveCutsceneProgress');
+    const menuRestart = document.getElementById('menuRestart');
+    const menuToggleSound = document.getElementById('menuToggleSound');
+    const menuSaveGame = document.getElementById('menuSaveGame');
+    const menuToggleFullscreen = document.getElementById('menuToggleFullscreen');
+    const menuSettings = document.getElementById('menuSettings');
+    const menuToggleSFX = document.getElementById('menuToggleSFX');
+
+    const chestItems = document.querySelectorAll('#chestGrid .chest-item');
+    const closeSettings = closeSettingsBtn;
+
+    /* ======================
+       Game state
+       ====================== */
+    let state = {
+      isCutsceneComplete: false,
+      currentMessageIndex: 0,
+      currentLineIndex: 0,
+      currentText: '',
+      isTyping: false,
+      gamePaused: false,
+      sfxEnabled: true,
+      musicEnabled: true,
+      backgroundMusicVolume: 1,
+      saveCutsceneProgress: true,
+      selectedHotbarSlot: 1,
+    };
+
+    // Player (canvas-driven)
+    const player = {
+      x: 100,
+      y: 100,
+      width: 48,
+      height: 64,
+      color: 'cyan',
+      dx: 0, dy: 0,
+      speed: 5,
+      gravity: 0.8,
+      jumpStrength: -14,
+      onGround: false,
+      isJumping: false,
+    };
+
+    // Platform / ground
+    function getGroundY() { return canvas.height - 80; } // easy function for dynamic ground
+    const platform = {
+      x: 0, y: getGroundY(), width: canvas.width, height: 80, color: '#444'
+    };
+
+    // Cutscene messages (kept from original)
+    const cutsceneMessages = [
+      "Initializing Scan...",
+      "New Id Detected- rift_Techinican_0_167.",
+      "Welcome, KAI WALKER",
+      "Welcome to Drt Inc, Dimensional Rift Technologies Inc.",
+      "You are the newest Rift Technician!",
+      "Your job is monitor, maintain and stabilize Rifts to prevent dimensional collapse.",
+      "Do you think you can complete the portal protocol?"
+    ];
+
+    // Controls
+    const keys = { left:false, right:false, up:false, down:false, space:false, shift:false };
+
+    /* ======================
+       Audio (preload but don't autoplay SFX)
+       ====================== */
+    const jumpSFX = new Audio("https://cdn.glitch.global/786ea774-457c-43de-bae1-f741692bf03d/cartoon-jump-6462%20(1).mp3?v=1743861440466");
+    const walkingSFX = new Audio("https://cdn.glitch.global/786ea774-457c-43de-bae1-f741692bf03d/loud-footsteps-62038-%5BAudioTrimmer.com%5D-%5BAudioTrimmer.com%5D.mp3?v=1743995310590");
+    const runningSFX = new Audio("https://cdn.glitch.global/786ea774-457c-43de-bae1-f741692bf03d/running-on-concrete-268478.mp3?v=1743861464620");
+    const backgroundMusic = new Audio("https://cdn.glitch.global/786ea774-457c-43de-bae1-f741692bf03d/Galactic%20Glow-2.mp3?v=1741567498167");
+    backgroundMusic.loop = true;
+    backgroundMusic.volume = state.backgroundMusicVolume;
+
+    function playSFXOnce(audio) {
+      if (!state.sfxEnabled) return;
+      try {
+        audio.pause();
+        audio.currentTime = 0;
+        audio.play();
+      } catch (e) {
+        // Browsers may block autoplay; that's fine — audio will play on first gesture.
+      }
+    }
+
+    /* ======================
+       Utility / helpers
+       ====================== */
+    function show(el){ el.style.display = 'block'; }
+    function hide(el){ el.style.display = 'none'; }
+    function toggle(el){ el.style.display = (el.style.display === 'block') ? 'none' : 'block'; }
+
+    // Position an interact text near an element
+    function positionInteractText(el, textEl){
+      const rect = el.getBoundingClientRect();
+      textEl.style.left = Math.max(8, rect.left + rect.width/2 - 60) + 'px';
+      textEl.style.top  = Math.max(8, rect.top  - 34) + 'px';
+    }
+
+    /* ======================
+       Input handling
+       ====================== */
+    document.addEventListener('keydown', (e) => {
+      // basic movement keys
+      if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') keys.left = true;
+      if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') keys.right = true;
+      if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') keys.up = true;
+      if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') keys.down = true;
+      if (e.code === 'Space') keys.space = true;
+      if (e.key === 'Shift') keys.shift = true;
+
+      // Pause toggle (Escape)
+      if (e.key === 'Escape') {
+        togglePause();
+      }
+
+      // Use / Interact 'E'
+      if ((e.key === 'e' || e.key === 'E')) {
+        // chest interaction
+        if (isHoveringChest) openChest();
+        if (isHoveringDoor) enterDoor();
+      }
+
+      // Hotbar selection: 1-8
+      if (e.key >= '1' && e.key <= '8') {
+        state.selectedHotbarSlot = parseInt(e.key);
+        updateHotbarSelection();
+      }
+    });
+
+    document.addEventListener('keyup', (e) => {
+      if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') keys.left = false;
+      if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') keys.right = false;
+      if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') keys.up = false;
+      if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') keys.down = false;
+      if (e.code === 'Space') keys.space = false;
+      if (e.key === 'Shift') keys.shift = false;
+    });
+
+    // Right-click menu on canvas
+    canvas.addEventListener('contextmenu', (ev) => {
+      ev.preventDefault();
+      rightClickMenu.style.left = ev.pageX + 'px';
+      rightClickMenu.style.top = ev.pageY + 'px';
+      show(rightClickMenu);
+    });
+    document.addEventListener('click', () => hide(rightClickMenu));
+
+    /* ======================
+       Hotbar logic
+       ====================== */
+    const hotbarItems = document.querySelectorAll('.hotbar-item');
+    function updateHotbarSelection(){
+      hotbarItems.forEach(it => it.classList.remove('active'));
+      const el = document.querySelector(`.hotbar-item[data-slot="${state.selectedHotbarSlot}"]`);
+      if (el) el.classList.add('active');
+    }
+    updateHotbarSelection();
+
+    // hotbar visibility
+    hotbarToggle.addEventListener('change', () => {
+      hotbar.style.display = hotbarToggle.checked ? 'flex' : 'none';
+    });
+    // mouse near bottom fade (optional)
+    document.addEventListener('mousemove', (ev) => {
+      if (ev.clientY > window.innerHeight - 80) hotbar.style.opacity = '1';
+      else hotbar.style.opacity = '0';
+    });
+
+    /* ======================
+       Chest and door interactions (hover/click)
+       ====================== */
+    let isHoveringChest = false;
+    let isHoveringDoor = false;
+
+    chestEl.addEventListener('mouseenter', () => {
+      isHoveringChest = true;
+      positionInteractText(chestEl, interactTextChest);
+      show(interactTextChest);
+    });
+    chestEl.addEventListener('mouseleave', () => {
+      isHoveringChest = false;
+      hide(interactTextChest);
+    });
+    chestEl.addEventListener('click', () => { openChest(); });
+
+    function openChest(){
+      show(chestUI);
+      hide(interactTextChest);
+    }
+    closeChestBtn.addEventListener('click', () => hide(chestUI));
+    chestItems.forEach(item => item.addEventListener('click', (e) => {
+      const name = e.currentTarget.innerText.trim() || 'Unknown Item';
+      // Simple pick-up demonstration
+      alert('You selected: ' + name);
+      hide(chestUI);
+    }));
+
+    doorEl.addEventListener('mouseenter', () => {
+      isHoveringDoor = true;
+      positionInteractText(doorEl, interactTextDoor);
+      show(interactTextDoor);
+    });
+    doorEl.addEventListener('mouseleave', () => {
+      isHoveringDoor = false;
+      hide(interactTextDoor);
+    });
+    doorEl.addEventListener('click', enterDoor);
+
+    function enterDoor(){
+      // simple "enter" effect: change page background and center player
+      document.body.style.backgroundImage = "url('https://cdn.glitch.global/786ea774-457c-43de-bae1-f741692bf03d/Image_20250305_180433_654.png?v=1741449517203')";
+      document.body.style.backgroundSize = 'cover';
+      // reposition player to center of canvas
+      player.x = (canvas.width - player.width) / 2;
+      player.y = (canvas.height - player.height) / 2;
+      player.dy = 0;
+      hide(interactTextDoor);
+    }
+
+    /* ======================
+       Pause / resume / settings
+       ====================== */
+    function togglePause(){
+      state.gamePaused = !state.gamePaused;
+      if (state.gamePaused) show(pauseMenu);
+      else hide(pauseMenu);
+    }
+    resumeButton.addEventListener('click', () => { state.gamePaused = false; hide(pauseMenu); });
+    restartButton.addEventListener('click', restartGame);
+    exitButton.addEventListener('click', () => alert('Exit to main menu not implemented.'));
+    openSettingsFromPause.addEventListener('click', () => { hide(pauseMenu); show(settingsMenu); });
+
+    // settings controls
+    closeSettings.addEventListener('click', () => hide(settingsMenu));
+    saveSettingsBtn.addEventListener('click', () => {
+      // persist some simple settings
+      state.backgroundMusicVolume = parseFloat(volumeControl.value);
+      backgroundMusic.volume = state.backgroundMusicVolume;
+      state.saveCutsceneProgress = saveCutsceneProgressCheckbox.checked;
+      state.musicEnabled = true; // toggle handled separately
+      alert('Settings saved!');
+      hide(settingsMenu);
+    });
+
+    // Right-click menu actions wiring
+    menuRestart.addEventListener('click', () => { restartGame(); hide(rightClickMenu); });
+    menuToggleSound.addEventListener('click', () => {
+      state.musicEnabled = !state.musicEnabled;
+      if (state.musicEnabled) try { backgroundMusic.play(); } catch(e){}
+      else backgroundMusic.pause();
+      alert('Music ' + (state.musicEnabled ? 'On' : 'Off'));
+      hide(rightClickMenu);
+    });
+    menuSaveGame.addEventListener('click', () => { alert('Game saved (demo)'); hide(rightClickMenu); });
+    menuToggleFullscreen.addEventListener('click', () => {
+      if (!document.fullscreenElement) document.documentElement.requestFullscreen();
+      else document.exitFullscreen();
+      hide(rightClickMenu);
+    });
+    menuSettings.addEventListener('click', () => { show(settingsMenu); hide(rightClickMenu); });
+    menuToggleSFX.addEventListener('click', () => {
+      state.sfxEnabled = !state.sfxEnabled;
+      alert('SFX ' + (state.sfxEnabled ? 'On' : 'Off'));
+      hide(rightClickMenu);
+    });
+
+    /* ======================
+       Sound controls & volume display
+       ====================== */
+    volumeControl.addEventListener('input', (e) => {
+      const v = parseFloat(e.target.value);
+      backgroundMusic.volume = v;
+      volumeLabel.innerText = Math.round(v * 100) + '%';
+    });
+
+    /* ======================
+       Cutscene typing
+       ====================== */
+    function typeText(text, onComplete){
+      let i=0;
+      state.currentText = '';
+      state.isTyping = true;
+      function step(){
+        if (!state.isTyping) return; // allow interruption
+        if (i < text.length){
+          state.currentText += text.charAt(i++);
+          setTimeout(step, 40);
+        } else {
+          state.isTyping = false;
+          if (onComplete) onComplete();
+        }
+      }
+      step();
+    }
+
+    // Skip cutscene
+    skipButton.addEventListener('click', () => {
+      state.isCutsceneComplete = true;
+      state.currentMessageIndex = cutsceneMessages.length;
+      hide(skipButton);
+    });
+
+    /* ======================
+       Gameplay physics & drawing
+       ====================== */
+    function drawPlatform(){
+      ctx.fillStyle = platform.color;
+      ctx.fillRect(platform.x, platform.y, canvas.width, platform.height);
+    }
+
+    function drawPlayer(){
+      ctx.fillStyle = player.color;
+      ctx.fillRect(player.x, player.y, player.width, player.height);
+    }
+
+    function updatePlayer(){
+      // horizontal
+      const baseSpeed = 5;
+      const speedBoost = 8;
+      const spd = keys.shift ? speedBoost : baseSpeed;
+
+      if (keys.left) { player.dx = -spd; playSFXOnce(walkingSFX); }
+      else if (keys.right) { player.dx = spd; playSFXOnce(walkingSFX); }
+      else player.dx = 0;
+
+      // gravity & jump
+      player.dy += player.gravity;
+      if ((keys.space || keys.up) && player.onGround && !player.isJumping){
+        player.dy = player.jumpStrength;
+        player.isJumping = true;
+        player.onGround = false;
+        playSFXOnce(jumpSFX);
+      }
+
+      player.x += player.dx;
+      player.y += player.dy;
+
+      // ground collision
+      if (player.y + player.height > platform.y) {
+        player.y = platform.y - player.height;
+        player.dy = 0;
+        player.onGround = true;
+        player.isJumping = false;
+      }
+
+      // bounds
+      if (player.x < 0) player.x = 0;
+      if (player.y < 0) player.y = 0;
+      if (player.x + player.width > canvas.width) player.x = canvas.width - player.width;
+      if (player.y + player.height > canvas.height) player.y = canvas.height - player.height;
+    }
+
+    /* ======================
+       Game loop
+       ====================== */
+    function gameLoop(){
+      // Always request next frame
+      requestAnimationFrame(gameLoop);
+
+      // If paused, skip update/draw
+      if (state.gamePaused) return;
+
+      // Clear
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+
+      // If cutscene not complete: render cutscene text at bottom
+      if (!state.isCutsceneComplete){
+        if (state.currentMessageIndex < cutsceneMessages.length){
+          const msg = cutsceneMessages[state.currentMessageIndex];
+          if (!state.isTyping){
+            typeText(msg, () => {
+              // after line finished, move to next after small delay
+              setTimeout(() => {
+                state.currentMessageIndex++;
+                state.currentText = '';
+                // auto complete if skip chosen
+                if (state.currentMessageIndex >= cutsceneMessages.length) {
+                  state.isCutsceneComplete = true;
+                  hide(skipButton);
+                }
+              }, 800);
+            });
+          }
+          // draw cutscene text
+          ctx.fillStyle = 'white';
+          ctx.font = '20px Arial';
+          const textToShow = state.isTyping ? state.currentText : msg;
+          ctx.fillText(textToShow, 40, canvas.height - 60);
+          // draw a simple progress indicator
+          ctx.fillStyle = 'rgba(255,255,255,0.06)';
+          ctx.fillRect(40, canvas.height - 52, canvas.width - 80, 6);
+          let prog = (state.currentMessageIndex / cutsceneMessages.length) * (canvas.width - 80);
+          ctx.fillStyle = 'cyan';
+          ctx.fillRect(40, canvas.height - 52, Math.max(0, prog), 6);
+        } else {
+          state.isCutsceneComplete = true;
+          hide(skipButton);
+        }
+        return; // during cutscene we skip gameplay logic
+      }
+
+      // Draw platform
+      platform.y = getGroundY();
+      drawPlatform();
+
+      // Update & draw player
+      updatePlayer();
+      drawPlayer();
+    }
+
+    // Start loop
+    requestAnimationFrame(gameLoop);
+
+    /* ======================
+       Game control helpers
+       ====================== */
+    function restartGame(){
+      // reset variables
+      state.isCutsceneComplete = false;
+      state.currentMessageIndex = 0;
+      state.currentLineIndex = 0;
+      state.currentText = '';
+      state.isTyping = false;
+      state.gamePaused = false;
+      player.x = 100;
+      player.y = 100;
+      player.dx = player.dy = 0;
+      show(skipButton);
+      hide(pauseMenu);
+      hide(settingsMenu);
+      // attempt to restart music
+      if (state.musicEnabled) try { backgroundMusic.play(); } catch(e){}
+    }
+
+    // Call at first user interaction to allow audio playback if blocked
+    function unlockAudioOnFirstGesture(){
+      document.removeEventListener('pointerdown', unlockAudioOnFirstGesture);
+      try { if (state.musicEnabled) backgroundMusic.play(); } catch(e){}
+    }
+    document.addEventListener('pointerdown', unlockAudioOnFirstGesture);
+
+    /* ======================
+       Mobile / touch support (simple)
+       ====================== */
+    if (/Mobi|Android/i.test(navigator.userAgent)) {
+      document.getElementById('mobileControls').style.display = 'flex';
+    }
+    const moveLeftBtn = document.getElementById('moveLeft');
+    const moveRightBtn = document.getElementById('moveRight');
+    const jumpBtn = document.getElementById('jump');
+    if (moveLeftBtn && moveRightBtn && jumpBtn) {
+      moveLeftBtn.addEventListener('touchstart', () => keys.left = true); moveLeftBtn.addEventListener('touchend', () => keys.left = false);
+      moveRightBtn.addEventListener('touchstart', () => keys.right = true); moveRightBtn.addEventListener('touchend', () => keys.right = false);
+      jumpBtn.addEventListener('touchstart', () => { if (player.onGround){ keys.space = true; setTimeout(()=>keys.space=false,150); }});
+    }
+
+    /* ======================
+       Secret combo (kept as original)
+       ====================== */
+    (function setupSecretCombo(){
+      let enteredCombo = '';
+      const secretCombination = '3.14';
+      document.addEventListener('keydown', (ev) => {
+        if (ev.key.match(/[0-9\.]/)) {
+          enteredCombo += ev.key;
+          if (enteredCombo === secretCombination) {
+            alert('You have unlocked the power of flight! Use the arrow keys to fly.');
+            enteredCombo = '';
+            // enabling simple flight (toggle)
+            player.gravity = -0.2;
+            setTimeout(()=>{ player.gravity = 0.8; }, 8000); // limited flight for demo
+          }
+          if (enteredCombo.length > secretCombination.length) enteredCombo = enteredCombo.slice(-secretCombination.length);
+        }
+      });
+    })();
+
+    // Clean startup: load saved settings
+    (function loadSettings(){
+      const volume = localStorage.getItem('volume');
+      const saveProgress = localStorage.getItem('saveCutsceneProgress');
+      if (volume !== null) {
+        const v = parseFloat(volume);
+        backgroundMusic.volume = v;
+        volumeControl.value = v;
+        volumeLabel.innerText = Math.round(v*100) + '%';
+      }
+      if (saveProgress !== null) {
+        saveCutsceneProgressCheckbox.checked = (saveProgress === 'true');
+        state.saveCutsceneProgress = (saveProgress === 'true');
+      }
+      // attempt to play music if allowed
+      try { if (state.musicEnabled) backgroundMusic.play(); } catch(e){}
+    })();
+
+    // Save settings button handler
+    document.getElementById('saveSettings').addEventListener('click', () => {
+      localStorage.setItem('volume', volumeControl.value);
+      localStorage.setItem('saveCutsceneProgress', saveCutsceneProgressCheckbox.checked);
+      state.backgroundMusicVolume = parseFloat(volumeControl.value);
+      backgroundMusic.volume = state.backgroundMusicVolume;
+      alert('Settings saved to localStorage');
+      hide(settingsMenu);
+    });
+
+    // Set initial hotbar display
+    hotbar.style.display = hotbarToggle.checked ? 'flex' : 'none';
+
+  })();
+  </script>
+
+</body>
+</html>
